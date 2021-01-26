@@ -558,7 +558,6 @@ class kittiOdomEval():
             eva_seq_dir = os.path.join(eval_dir, '{}_eval'.format(seq))
             pred_file_name = self.result_dir + '/{}_pred.txt'.format(seq)
             # pred_file_name = self.result_dir + '/{}.txt'.format(seq)
-            gt_file_name   = self.gt_dir + '/{}.txt'.format(seq)
             save_file_name = eva_seq_dir + '/{}.pdf'.format(seq)
             assert os.path.exists(pred_file_name), "File path error: {}".format(pred_file_name)
             
@@ -573,7 +572,10 @@ class kittiOdomEval():
             poses_result = self.loadPoses(pred_file_name, toCameraCoord=toCameraCoord)
 
             if not os.path.exists(eva_seq_dir): os.makedirs(eva_seq_dir) 
-
+            
+            seq = seq.split("_")[0]
+            gt_file_name   = self.gt_dir + '/{}.txt'.format(seq)
+            
             if seq not in self.seqs_with_gt:
                 self.calcSequenceErrors(poses_result, poses_result)
                 print ("\nSequence: " + str(seq))
