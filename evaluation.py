@@ -1,6 +1,6 @@
-
 #
 # Copyright Qing Li (hello.qingli@gmail.com) 2018. All Rights Reserved.
+# Modified by Do Hyung Kwon 2021
 #
 # References: 1. KITTI odometry development kit: http://www.cvlibs.net/datasets/kitti/eval_odometry.php
 #             2. A Geiger, P Lenz, R Urtasun. Are we ready for Autonomous Driving? The KITTI Vision Benchmark Suite. CVPR 2012.
@@ -40,9 +40,14 @@ class kittiOdomEval():
                 os.remove(self.result_dir + '/all_stats.txt')
             files = glob.glob(self.result_dir + '/*.txt')
             assert files, "There is not trajectory files in: {}".format(self.result_dir)
+            files = sorted(files)
             for f in files:
                 dirname, basename = os.path.split(f)
                 file_name = os.path.splitext(basename)[0]
+                file_dir = f"{dirname}/{file_name}".replace("_pred", "_eval")
+                if os.path.exists(file_dir):    
+                    continue
+                print(file_dir)
                 self.eval_seqs.append(str(file_name))
         else:
             seqs = config.eva_seqs.split(',')
@@ -555,6 +560,7 @@ class kittiOdomEval():
         total_err = []
         ave_errs = {}       
         for seq in self.eval_seqs:
+            print(f"Evaluating {seq}")
             eva_seq_dir = os.path.join(eval_dir, '{}_eval'.format(seq))
             pred_file_name = self.result_dir + '/{}_pred.txt'.format(seq)
             # pred_file_name = self.result_dir + '/{}.txt'.format(seq)
