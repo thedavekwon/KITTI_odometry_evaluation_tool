@@ -131,6 +131,14 @@ class kittiOdomEval():
         d = 0.5*(a+b+c-1.0)
         return np.arccos(max(min(d,1.0),-1.0))
 
+    def rotationYawError(self, pose_error):
+        # a = pose_error[0,0]
+        # b = pose_error[1,1]
+        # c = pose_error[2,2]
+        # d = 0.5*(a+b+c-1.0)
+        euler = tr.euler_from_matrix(pose_error, axes='szxy')
+        return np.abs(euler[2])
+    
     def translationError(self, pose_error):
         dx = pose_error[0,3]
         dy = pose_error[1,3]
@@ -171,13 +179,14 @@ class kittiOdomEval():
 
                 r_err = self.rotationError(pose_error)
                 t_err = self.translationError(pose_error)
+                yaw_err = self.rotationYawError(pose_error)
 
                 # compute speed 
                 num_frames = last_frame - first_frame + 1.0
                 speed = len_ / (0.1*num_frames)   # 10Hz
                 if speed > self.max_speed:
                     self.max_speed = speed
-                err.append([first_frame, r_err/len_, t_err/len_, len_, speed])
+                err.append([first_frame, r_err/len_, t_err/len_, len_, speed, yaw_err])
         return err
         
     def saveSequenceErrors(self, err, file_name):
@@ -190,14 +199,17 @@ class kittiOdomEval():
     def computeOverallErr(self, seq_err):
         t_err = 0
         r_err = 0
+        yaw_err = 0
         seq_len = len(seq_err)
 
         for item in seq_err:
             r_err += item[1]
             t_err += item[2]
+            yaw_err += item[5]
         ave_t_err = t_err / seq_len
         ave_r_err = r_err / seq_len
-        return ave_t_err, ave_r_err 
+        ave_yaw_err = yaw_err / seq_len
+        return ave_t_err, ave_r_err, ave_yaw_err
 
     def plot_xyz(self, seq, poses_ref, poses_pred, plot_path_dir):
         
@@ -609,7 +621,7 @@ class kittiOdomEval():
 
             # ----------------------------------------------------------------------
             # compute overall error
-            ave_t_err, ave_r_err = self.computeOverallErr(seq_err)
+            ave_t_err, ave_r_err, ave_yaw_err = self.computeOverallErr(seq_err)
             print ("\nSequence: " + str(seq))
             print ('Distance (m): %d' % self.distance)
             print ('Max speed (km/h): %d' % (self.max_speed*3.6))
@@ -658,6 +670,101 @@ class kittiOdomEval():
         #     print ("{0:.2f}".format(ave_r_errs[seq]/np.pi*180*100))
         # print ("-------------------------------------------------")
 
+    def eval_rot(self, toCameraCoord):
+        '''
+            to_camera_coord: whether the predicted pose needs to be convert to camera coordinate
+        '''
+        eval_dir = self.result_dir
+        if not os.path.exists(eval_dir): os.makedirs(eval_dir)
+
+        total_err = []
+        ave_errs = {}       
+        for seq in self.eval_seqs:
+            print(f"Evaluating {seq}")
+            eva_seq_dir = os.path.join(eval_dir, '{}_eval'.format(seq))
+            pred_file_name = self.result_dir + '/{}_pred.txt'.format(seq)
+            # pred_file_name = self.result_dir + '/{}.txt'.format(seq)
+            save_file_name = eva_seq_dir + '/{}.pdf'.format(seq)
+            assert os.path.exists(pred_file_name), "File path error: {}".format(pred_file_name)
+            
+            # ----------------------------------------------------------------------
+            # load pose
+            # if seq in self.seqs_with_gt:
+            #     self.call_evo_traj(pred_file_name, save_file_name, gt_file=gt_file_name)
+            # else:
+            #     self.call_evo_traj(pred_file_name, save_file_name, gt_file=None)
+            #     continue
+            
+            poses_result = self.loadPoses(pred_file_name, toCameraCoord=toCameraCoord)
+
+            if not os.path.exists(eva_seq_dir): os.makedirs(eva_seq_dir) 
+            
+            seq = seq.split("_")[0]
+            gt_file_name   = self.gt_dir + '/{}.txt'.format(seq)
+          
+            poses_gt = self.loadPoses(gt_file_name, toCameraCoord=False)
+
+            # ----------------------------------------------------------------------
+            # compute sequence errors
+            seq_err = self.calcSequenceErrors(poses_gt, poses_result)
+            self.saveSequenceErrors(seq_err, eva_seq_dir + '/{}_error.txt'.format(seq))
+
+            total_err += seq_err
+
+            # ----------------------------------------------------------------------
+            # Compute segment errors
+            avg_segment_errs = self.computeSegmentErr(seq_err)
+            avg_speed_errs   = self.computeSpeedErr(seq_err)
+
+            # ----------------------------------------------------------------------
+            # compute overall error
+            ave_t_err, ave_r_err, ave_yaw_err = self.computeOverallErr(seq_err)
+            print ("\nSequence: " + str(seq))
+            print ('Distance (m): %d' % self.distance)
+            print ('Max speed (km/h): %d' % (self.max_speed*3.6))
+            print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
+            print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
+            print ("Average sequence yaw error (deg/m): {0:.7f}".format(ave_r_err))
+            with open(eva_seq_dir + '/%s_stats.txt' % seq, 'w') as f:
+                f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
+                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
+                f.writelines("Average sequence yaw error (deg/m): {0:.10f}\n".format(ave_r_err))
+            ave_errs[seq] = [ave_t_err, ave_r_err]
+
+            # ----------------------------------------------------------------------
+            # Ploting
+            self.plot_rpy(seq, poses_gt, poses_result, eva_seq_dir)
+            self.plotError_segment(seq, avg_segment_errs, eva_seq_dir)
+            self.plotError_speed(seq, avg_speed_errs, eva_seq_dir)
+
+            plt.close('all')
+
+        # total_avg_segment_errs = self.computeSegmentErr(total_err)
+        # total_avg_speed_errs   = self.computeSpeedErr(total_err)        
+        # self.plotError_segment('total_error_seg', total_avg_segment_errs, eval_dir)
+        # self.plotError_speed('total_error_speed', total_avg_speed_errs, eval_dir)
+
+
+        # if ave_errs:
+        #     with open(eval_dir + '/all_stats.txt', 'w') as f:
+        #         for seq, ave_err in ave_errs.items():
+        #             f.writelines('%s:\n' % seq)
+        #             f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_err[0] * 100))
+        #             f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n\n'.format(ave_err[1]/np.pi * 180))
+
+            # parent_path, model_step = os.path.split(os.path.normpath(eval_dir))
+            # with open(os.path.join(parent_path, 'test_statistics.txt'), 'a') as f:
+            #     f.writelines('------------------ %s -----------------\n' % model_step)
+            #     for seq, ave_err in ave_errs.items():
+            #         f.writelines('%s:\n' % seq)
+            #         f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_err[0] * 100))
+            #         f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n\n'.format(ave_err[1]/np.pi * 180))
+                      
+        # print ("-------------------------------------------------")
+        # for seq in range(len(ave_t_errs)):
+        #     print ("{0:.2f}".format(ave_t_errs[seq]*100))
+        #     print ("{0:.2f}".format(ave_r_errs[seq]/np.pi*180*100))
+        # print ("-------------------------------------------------")
      
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='KITTI Evaluation toolkit')
@@ -668,6 +775,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     pose_eval = kittiOdomEval(args)
-    pose_eval.eval(toCameraCoord=args.toCameraCoord)   # set the value according to the predicted results
+    pose_eval.eval_rot(toCameraCoord=args.toCameraCoord)   # set the value according to the predicted results
 
     
