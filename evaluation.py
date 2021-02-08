@@ -145,6 +145,11 @@ class kittiOdomEval():
         dz = pose_error[2,3]
         return np.sqrt(dx**2+dy**2+dz**2)
 
+    def translationXZError(self, pose_error):
+        dx = pose_error[0,3]
+        dz = pose_error[2,3]
+        return np.sqrt(dx**2+dz**2)
+
     def lastFrameFromSegmentLength(self, dist, first_frame, len_):
         for i in range(first_frame, len(dist), 1):
             if dist[i] > (dist[first_frame] + len_):
@@ -180,13 +185,14 @@ class kittiOdomEval():
                 r_err = self.rotationError(pose_error)
                 t_err = self.translationError(pose_error)
                 yaw_err = self.rotationYawError(pose_error)
+                t_xz_err = self.translationXZError(pose_error)
 
                 # compute speed 
                 num_frames = last_frame - first_frame + 1.0
                 speed = len_ / (0.1*num_frames)   # 10Hz
                 if speed > self.max_speed:
                     self.max_speed = speed
-                err.append([first_frame, r_err/len_, t_err/len_, len_, speed, yaw_err])
+                err.append([first_frame, r_err/len_, t_err/len_, len_, speed, yaw_err/len_, t_xz_err/len_])
         return err
         
     def saveSequenceErrors(self, err, file_name):
@@ -200,16 +206,19 @@ class kittiOdomEval():
         t_err = 0
         r_err = 0
         yaw_err = 0
+        t_xz_err = 0
         seq_len = len(seq_err)
 
         for item in seq_err:
             r_err += item[1]
             t_err += item[2]
             yaw_err += item[5]
+            t_xz_err += item[6]
         ave_t_err = t_err / seq_len
         ave_r_err = r_err / seq_len
         ave_yaw_err = yaw_err / seq_len
-        return ave_t_err, ave_r_err, ave_yaw_err
+        ave_t_xz_err = t_xz_err / seq_len
+        return ave_t_err, ave_r_err, ave_yaw_err, ave_t_xz_err
 
     def plot_xyz(self, seq, poses_ref, poses_pred, plot_path_dir):
         
@@ -621,15 +630,19 @@ class kittiOdomEval():
 
             # ----------------------------------------------------------------------
             # compute overall error
-            ave_t_err, ave_r_err, ave_yaw_err = self.computeOverallErr(seq_err)
+            ave_t_err, ave_r_err, ave_yaw_err, ave_t_xz_err = self.computeOverallErr(seq_err)
             print ("\nSequence: " + str(seq))
             print ('Distance (m): %d' % self.distance)
             print ('Max speed (km/h): %d' % (self.max_speed*3.6))
             print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
-            print ("Average sequence rotational error (deg/m): {0:.4f}\n".format(ave_r_err/np.pi * 180))
+            print ("Average sequence translational XZ RMSE (%):  {0:.4f}\n".format(ave_t_xz_err*100))
+            print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
+            print ("Average sequence yaw error (deg/m): {0:.7f}".format(ave_r_err))
             with open(eva_seq_dir + '/%s_stats.txt' % seq, 'w') as f:
+                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
+                f.writelines("Average sequence yaw error (deg/m): {0:.10f}\n".format(ave_r_err))
                 f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
-                f.writelines('Average sequence rotation error (deg/m):  {0:.4f}'.format(ave_r_err/np.pi * 180))
+                f.writelines("Average sequence translational XZ RMSE (%):  {0:.4f}\n".format(ave_t_xz_err*100))
             ave_errs[seq] = [ave_t_err, ave_r_err]
 
             # ----------------------------------------------------------------------
@@ -718,15 +731,13 @@ class kittiOdomEval():
 
             # ----------------------------------------------------------------------
             # compute overall error
-            ave_t_err, ave_r_err, ave_yaw_err = self.computeOverallErr(seq_err)
+            ave_t_err, ave_r_err, ave_yaw_err, ave_t_xz_err = self.computeOverallErr(seq_err)
             print ("\nSequence: " + str(seq))
             print ('Distance (m): %d' % self.distance)
             print ('Max speed (km/h): %d' % (self.max_speed*3.6))
-            print ("Average sequence translational RMSE (%):   {0:.4f}".format(ave_t_err * 100))
             print ("Average sequence rotational error (deg/m): {0:.4f}".format(ave_r_err/np.pi * 180))
             print ("Average sequence yaw error (deg/m): {0:.7f}".format(ave_r_err))
             with open(eva_seq_dir + '/%s_stats.txt' % seq, 'w') as f:
-                f.writelines('Average sequence translation RMSE (%):    {0:.4f}\n'.format(ave_t_err * 100))
                 f.writelines('Average sequence rotation error (deg/m):  {0:.4f}\n'.format(ave_r_err/np.pi * 180))
                 f.writelines("Average sequence yaw error (deg/m): {0:.10f}\n".format(ave_r_err))
             ave_errs[seq] = [ave_t_err, ave_r_err]
